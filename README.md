@@ -1,1 +1,1 @@
-# claudeapp0-5goles
+# TANOapp---+0,5goles---
