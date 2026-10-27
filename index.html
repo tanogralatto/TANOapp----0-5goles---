@@ -841,7 +841,7 @@ async function initFirebaseFavorites(){
         return;
       }
       const email=normalizedEmail(user.email);
-      let authorized=email===ADMIN_EMAIL;
+      let authorized=email===ADMIN_EMAIL || email==='johanlo0925@gmail.com';
       if(!authorized){
         try{
           const allowRef=doc(favoriteState.db,'allowedUsers',email);
