@@ -500,7 +500,7 @@ async function buscar(){
   try{
     const j=await api('/fixtures',{date:$('#date').value,timezone:TZ});
     const now=Date.now();
-    state.fixtures=(j.response||[]).map(f=>({id:f.fixture.id,iso:f.fixture.date,st:f.fixture.status.short,lid:f.league.id,ln:f.league.name,lc:f.league.country||'Mundo',hid:f.teams.home.id,hn:f.teams.home.name,aid:f.teams.away.id,an:f.teams.away.name})).
+    state.fixtures=(j.response||[]).map(f=>({id:f.fixture.id,iso:f.fixture.date,st:f.fixture.status.short,lid:f.league.id,ln:f.league.name,lc:f.league.country||'Mundo',hid:f.teams.home.id,hn:f.teams.home.name,aid:f.teams.away.id,an:f.teams.away.name}));
     if(!state.fixtures.length) setStatus($('#fxMsg'),'No quedan partidos por comenzar para esa fecha.');
     renderLeagues();
   }catch(e){ setStatus($('#fxMsg'),e.message,true); }
