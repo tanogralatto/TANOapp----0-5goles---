@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Analizador de mercados de goles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: una hoja de partido por tarjeta, con el promedio como marcador a la derecha y los 7 criterios como celdas de tablero. */
+:root{
+  --bg:#ECF0EA;
+  --surface:#F8FAF6;
+  --ink:#15201A;
+  --muted:#586960;
+  --line:#CBD5CA;
+  --accent:#1B6B45;
+  --accent-ink:#FFFFFF;
+  --c4:#1B6B45;
+  --c3:#4B7D2A;
+  --c2:#94640A;
+  --c1:#A63B27;
+  --warn-bg:#FBF1DA;
+  --font-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-data:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1612;--surface:#17211B;--ink:#E6EDE7;--muted:#93A398;--line:#2B3A31;
+    --accent:#4CC38A;--accent-ink:#06130C;--c4:#4CC38A;--c3:#9BC95B;--c2:#E0B03A;--c1:#EE7F66;--warn-bg:#2A2412;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1612;--surface:#17211B;--ink:#E6EDE7;--muted:#93A398;--line:#2B3A31;
+  --accent:#4CC38A;--accent-ink:#06130C;--c4:#4CC38A;--c3:#9BC95B;--c2:#E0B03A;--c1:#EE7F66;--warn-bg:#2A2412;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:20px 48px}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2{font-family:var(--font-display);margin:0;text-wrap:balance;letter-spacing:.01em}
+h1{font-size:44px;line-height:1;font-weight:700;text-transform:uppercase}
+h2{font-size:22px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.sub{margin:6px 0 0;color:var(--muted);max-width:60ch}
+section.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field.grow{flex:1 1 240px}
+.market-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.market-option{min-height:56px;padding:7px 10px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;text-align:left}
+.market-option[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.market-main{font-size:14px;font-weight:700}
+.market-help{font-size:11px;opacity:.78;font-weight:400}
+label,.lbl{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+input[type=text],input[type=password],input[type=date],input[type=search],input[type=number],select{
+  font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:9px 10px;min-height:42px;min-width:0;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{font:inherit;font-weight:600;min-height:42px;padding:0 16px;border-radius:4px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.small{font-size:13px;color:var(--muted)}
+.mono{font-family:var(--font-data)}
+.status{font-size:13px;color:var(--muted);min-height:1.4em}
+.status.err{color:var(--c1)}
+.check{display:flex;gap:8px;align-items:center;font-size:14px;min-height:42px}
+.check input{width:18px;height:18px;accent-color:var(--accent)}
+.criteria summary{display:flex;align-items:center;justify-content:space-between;gap:12px;list-style:none;min-height:42px;padding:0 2px;font-size:18px;font-weight:600;color:var(--ink)}
+.criteria summary::-webkit-details-marker{display:none}
+.criteria summary::after{content:"⌄";font-size:22px;line-height:1;color:var(--muted);transition:transform .15s}
+.criteria[open] summary::after{transform:rotate(180deg)}
+.criteria-count{color:var(--muted);font-weight:500}
+.criteria-list{display:flex;flex-direction:column;gap:8px}
+.criterion{display:grid;grid-template-columns:24px minmax(90px,110px) auto minmax(90px,112px) auto minmax(90px,112px) auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;min-width:0}
+.criterion-name{font-family:var(--font-data);font-weight:600}
+.criterion input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+.criterion input[type=number]{width:100%;font:inherit;font-family:var(--font-data);font-weight:600;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-height:42px}
+.criterion input:disabled{opacity:.55}
+.criteria-foot{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.criteria-reset{border:0;background:transparent;color:var(--muted);padding:0;min-height:32px;text-align:left}
+.criteria-reset:hover{text-decoration:underline}
+.criterion-status{font-size:11px;color:var(--muted)}
+.criterion-status.ok{color:var(--c4);font-weight:600}
+.criterion-status.no{color:var(--c1);font-weight:600}
+
+/* ligas */
+.leagues{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:4px;padding:6px;background:var(--bg)}
+.lg{display:flex;gap:10px;align-items:center;padding:6px 8px;border-radius:4px;min-width:0;cursor:pointer;font-size:14px}
+.lg:hover{background:var(--surface)}
+.lg input{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.lg span.n{margin-left:auto;font-family:var(--font-data);font-size:12px;color:var(--muted);flex:none}
+.lg span.t{min-width:0;overflow-wrap:anywhere}
+.lg .c{color:var(--muted)}
+
+/* progreso */
+.prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+
+/* resultados */
+.cards{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-shadow:0 2px 8px rgba(21,32,26,.045)}
+.chead{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}
+.when{font-family:var(--font-data);font-size:13px;color:var(--muted);border-right:1px solid var(--line);padding-right:12px}
+.teams{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;min-width:0;font-size:17px}
+.teams b{font-weight:600}
+.teams span{color:var(--muted);font-size:13px}
+.avg{font-family:var(--font-display);font-size:42px;font-weight:700;line-height:.9;text-align:right;color:var(--c)}
+.avg small{max-width:120px}
+.avg small{display:block;font-family:var(--font-data);font-size:11px;font-weight:400;color:var(--muted);margin-top:4px;letter-spacing:0}
+.fav-btn{min-width:42px;width:42px;padding:0;font-size:24px;line-height:1;color:var(--muted);align-self:start}
+.fav-btn[aria-pressed="true"]{color:#C58A00;border-color:#C58A00;background:var(--warn-bg)}
+.fav-card{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.fav-card .fav-info{flex:1;min-width:180px}
+.fav-card .fav-info b{display:block}
+.fav-card .fav-info span{font-size:13px;color:var(--muted)}
+.league{margin:0;font-size:13px;color:var(--muted)}
+.cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.cell{border:1px solid var(--line);border-radius:6px;padding:10px;background:var(--bg);display:flex;flex-direction:column;gap:3px;min-width:0}
+.cell .lab{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;line-height:1.2}
+.cell .pct{font-family:var(--font-display);font-size:30px;font-weight:700;line-height:1;color:var(--c)}
+.cell .cnt{font-family:var(--font-data);font-size:12px;color:var(--muted)}
+.cell .bar{height:3px;background:var(--line);margin-top:3px}
+.cell .bar i{display:block;height:100%;background:var(--c);width:var(--w,0%)}
+.cell.short .cnt::after{content:" *"}
+.h4{--c:var(--c4)}.h3{--c:var(--c3)}.h2{--c:var(--c2)}.h1{--c:var(--c1)}.h0{--c:var(--muted)}
+details{border-top:1px dashed var(--line);padding-top:8px}
+summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:28px}
+.detail{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+.detail h3{margin:0 0 4px;font-size:13px;font-weight:600}
+.detail ul{list-style:none;margin:0;padding:0;font-family:var(--font-data);font-size:12px;overflow-x:auto}
+.detail li{display:grid;grid-template-columns:70px minmax(200px,1fr) 60px;gap:8px;padding:2px 0;border-bottom:1px solid var(--line)}
+.detail li.y .m{color:var(--c4)}.detail li.n .m{color:var(--c1)}.detail li.na{color:var(--muted)}
+.notes{background:var(--warn-bg);border:1px solid var(--line);border-radius:4px;padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.notes:empty{display:none}
+.empty{border:1px dashed var(--line);border-radius:6px;padding:26px 18px;color:var(--muted);text-align:center}
+.hidden{display:none!important}
+
+@media (max-width:640px){
+  h1{font-size:36px}
+  .cells{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .market-switch{grid-template-columns:1fr}
+  .market-option{min-height:48px;flex-direction:row;align-items:center;justify-content:space-between}
+  .market-help{font-size:12px}
+  .chead{grid-template-columns:1fr auto}
+  .when{grid-column:1/-1;border-right:0;padding-right:0}
+  .avg{font-size:40px}
+  .criterion{display:flex;flex-wrap:wrap;gap:7px;padding:9px}
+  .criterion-name{min-width:70px;flex:1}
+  .criterion input[type=number]{width:78px}
+  .criterion-phrase{font-size:12px}
+}
+@media (prefers-reduced-motion:reduce){.prog i{transition:none}}
+</style>
+</head>
+<body>
+<div id="accessGate" style="position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px">
+  <section class="panel" style="width:min(460px,100%);text-align:center">
+    <h1> TANOapp </h1>
+    <p>Acceso privado. Iniciá sesión con Google para continuar.</p>
+    <button id="gateSignIn" class="primary" type="button">Ingresar con Google</button>
+    <p id="gateStatus" role="status" style="margin-top:14px">Solo pueden ingresar las personas autorizadas por el administrador.</p>
+  </section>
+</div>
+<div class="wrap" id="appShell" style="display:none">
+
+<header>
+  <h1 id="appTitle">Over 0.5 1T</h1>
+  <p class="sub">Elegí el mercado, la fecha y las ligas. La app calcula tus 7 criterios históricos con datos reales de API-Football y ordena los partidos por su promedio descriptivo.</p>
+</header>
+
+<section class="panel" aria-labelledby="t-account">
+  <h2 id="t-account">Cuenta y favoritos</h2>
+  <div class="row" style="align-items:center">
+    <button id="googleSignIn" class="primary" type="button">Ingresar con Google</button>
+    <button id="googleSignOut" type="button" class="hidden">Cerrar sesión</button>
+    <span id="authStatus" class="status" role="status">Ingresá con Google para sincronizar tus favoritos entre dispositivos.</span>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="t-favs">
+  <h2 id="t-favs">★ Mis favoritos <span id="favoriteCount" class="small">· 0</span></h2>
+  <div id="favorites" class="cards"><div class="empty">Ingresá con Google y marcá la estrella de los partidos que quieras guardar.</div></div>
+</section>
+
+<section class="panel" aria-labelledby="t-key">
+  <h2 id="t-key">1. Conexión</h2>
+  <div class="row">
+    <div class="field grow">
+      <label for="key">Clave de API-Football</label>
+      <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Pegá tu clave (x-apisports-key)">
+    </div>
+    <div class="field" style="width:130px">
+      <label for="conc">En paralelo</label>
+      <select id="conc"><option value="2">2 consultas</option><option value="4" selected>4 consultas</option><option value="6">6 consultas</option><option value="8">8 consultas</option></select>
+    </div>
+    <button id="btnKey" class="primary" type="button">Guardar y probar</button>
+  </div>
+  <div id="quota" class="status" role="status">La clave se guarda solo en este navegador. No forma parte del archivo.</div>
+</section>
+
+<section class="panel" aria-labelledby="t-fx">
+  <h2 id="t-fx">2. Partidos y ligas</h2>
+  <div class="row">
+    <div class="field" style="width:100%">
+      <label for="market">Mercado de goles</label>
+      <div class="market-switch" role="group" aria-label="Elegir mercado">
+        <button type="button" class="market-option" data-market="ht05" aria-pressed="true"><span class="market-main">+0,5 1T</span><span class="market-help">Gol antes del descanso</span></button>
+        <button type="button" class="market-option" data-market="btts" aria-pressed="false"><span class="market-main">Ambos marcan</span><span class="market-help">En el partido</span></button>
+        <button type="button" class="market-option" data-market="over25" aria-pressed="false"><span class="market-main">+2,5 goles</span><span class="market-help">En el partido</span></button>
+      </div>
+    </div>
+    <div class="field" style="width:180px">
+      <label for="date">Fecha (hora Argentina)</label>
+      <input id="date" type="date">
+    </div>
+    <button id="btnFetch" class="primary" type="button">Buscar partidos</button>
+    <label class="check"><input id="onlyNS" type="checkbox" checked><span style="text-transform:none;letter-spacing:0;font-weight:400;font-size:14px;color:var(--ink)">Solo partidos sin empezar</span></label>
+  </div>
+  <div id="fxMsg" class="status" role="status"></div>
+  <div id="leagueTools" class="row hidden">
+    <div class="field grow"><label for="lfilter">Filtrar ligas</label><input id="lfilter" type="search" placeholder="País o liga"></div>
+    <button id="btnAll" type="button">Todas</button>
+    <button id="btnNone" type="button">Ninguna</button>
+  </div>
+  <div id="leagues" class="leagues hidden" role="group" aria-label="Ligas del día"></div>
+  <div class="row">
+    <button id="btnRun" class="primary" type="button" disabled>Analizar</button>
+    <button id="btnCancel" type="button" class="hidden">Cancelar</button>
+  </div>
+  <div id="progWrap" class="hidden"><div class="prog"><i id="progBar"></i></div><div id="progTxt" class="small mono" style="margin-top:6px"></div></div>
+</section>
+
+<section class="panel" aria-labelledby="t-criteria">
+  <details id="criteriaPanel" class="criteria">
+    <summary id="t-criteria">3. Criterios <span class="criteria-count">· <span id="criteriaCount">7</span> activos</span></summary>
+    <div id="criteriaList" class="criteria-list"></div>
+    <div class="criteria-foot">
+      <button id="criteriaReset" class="criteria-reset" type="button">↶ Restablecer criterios predeterminados</button>
+      <span class="small">Son filtros históricos iniciales, no probabilidades ni garantía de rentabilidad. Si un indicador tiene menos partidos válidos que la muestra mínima, el criterio figura como no evaluable.</span>
+    </div>
+  </details>
+</section>
+
+<section class="panel" aria-labelledby="t-res">
+  <h2 id="t-res">4. Resultados</h2>
+  <div id="resTools" class="row hidden">
+    <div class="field" style="width:190px"><label for="sort">Ordenar por</label>
+      <select id="sort"><option value="avg">Promedio descriptivo</option><option value="min">Criterio más bajo</option><option value="time">Hora</option></select></div>
+    <div class="field" style="width:170px"><label for="minAvg">Promedio descriptivo mínimo</label>
+      <select id="minAvg"><option value="0">Todos</option><option value="60">60%</option><option value="70">70%</option><option value="80">80%</option></select></div>
+    <label class="check"><input id="applyCriteria" type="checkbox"><span>Aplicar criterios</span></label>
+    <button id="btnCopy" type="button">Copiar lista</button>
+  </div>
+  <div id="notes" class="notes"></div>
+  <div id="results" class="cards"><div class="empty">Todavía no hay resultados. Buscá los partidos del día, marcá las ligas y tocá Analizar.</div></div>
+</section>
+
+</div>
+
+<script>
+/*PURE*/
+const DONE_ST=['FT','AET','PEN'];
+function compact(resp){
+  const out=[];
+  for(const f of resp||[]){
+    const st=f.fixture&&f.fixture.status&&f.fixture.status.short;
+    if(!DONE_ST.includes(st)) continue;
+    const s=f.score||{}, ht=s.halftime||{}, ft=s.fulltime||{};
+    let fh=null, hts=null;
+    if(Number.isInteger(ht.home)&&Number.isInteger(ht.away)){ fh=ht.home+ht.away; hts=[ht.home,ht.away]; }
+    else if(ft.home===0&&ft.away===0){ fh=0; }
+    const fs=Number.isInteger(ft.home)&&Number.isInteger(ft.away)?[ft.home,ft.away]:null;
+    out.push({i:f.fixture.id,d:f.fixture.timestamp,h:f.teams.home.id,a:f.teams.away.id,hn:f.teams.home.name,an:f.teams.away.name,ht:hts,fh,fs});
+  }
+  out.sort((x,y)=>y.d-x.d);
+  return out;
+}
+function hitFor(g,market){
+  if(market==='btts') return !!g.fs&&g.fs[0]>0&&g.fs[1]>0;
+  if(market==='over25') return !!g.fs&&g.fs[0]+g.fs[1]>=3;
+  return g.fh!==null&&g.fh>=1;
+}
+function stat(games,market){
+  let hits=0,valid=0,min=null,max=null;
+  for(const g of games){
+    const validScore=market==='ht05'?g.fh!==null:!!g.fs;
+    if(!validScore) continue;
+    valid++; if(hitFor(g,market)) hits++;
+    if(min===null||g.d<min) min=g.d;
+    if(max===null||g.d>max) max=g.d;
+  }
+  return {hits,valid,pct:valid?hits*100/valid:null,min,max};
+}
+function tramos(fx,L,V,H,market){
+  // Solo partidos terminados antes del inicio del encuentro analizado.
+  const cutoff=Math.floor(new Date(fx.iso).getTime()/1000);
+  const rec=a=>(a||[]).filter(g=>g.i!==fx.id&&Number.isFinite(g.d)&&g.d<cutoff).sort((x,y)=>y.d-x.d);
+  const l=rec(L), v=rec(V), h=rec(H);
+  const defs=[
+    ['l20','Local · últ. 20','Local: últimos 20 partidos',l.slice(0,20),20],
+    ['lc10','Local · casa 10','Local: últimos 10 jugados en casa',l.filter(g=>g.h===fx.hid).slice(0,10),10],
+    ['l6','Local · últ. 6','Local: últimos 6 partidos',l.slice(0,6),6],
+    ['v20','Visita · últ. 20','Visitante: últimos 20 partidos',v.slice(0,20),20],
+    ['vf10','Visita · fuera 10','Visitante: últimos 10 jugados fuera',v.filter(g=>g.a===fx.aid).slice(0,10),10],
+    ['v6','Visita · últ. 6','Visitante: últimos 6 partidos',v.slice(0,6),6],
+    ['h2h','H2H · últ. 8','Cruces directos: últimos 8',h.slice(0,8),8]
+  ];
+  return defs.map(([k,lab,full,games,target])=>({k,lab,full,target,games,...stat(games,market)}));
+}
+function resumen(tr){
+  const p=tr.filter(t=>t.pct!==null).map(t=>t.pct);
+  const n=p.length;
+  return {n,avg:n?p.reduce((a,b)=>a+b,0)/n:null,min:n?Math.min(...p):null};
+}
+function band(p){ if(p===null||p===undefined) return 'h0'; return p>=85?'h4':p>=70?'h3':p>=55?'h2':'h1'; }
+/*ENDPURE*/
+
+const API='https://v3.football.api-sports.io';
+const marketDefs={ht05:{title:'Over 0.5 1T',short:'Más de 0,5 goles al descanso',period:'primer tiempo'},btts:{title:'Ambos equipos marcan',short:'Ambos marcan',period:'partido completo'},over25:{title:'Más de 2,5 goles',short:'Más de 2,5 goles',period:'partido completo'}};
+const TZ='America/Argentina/Buenos_Aires';
+const TTL=12*3600*1000;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const LS={
+  get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
+};
+const fmtDate=ts=>new Date(ts*1000).toLocaleDateString('es-AR',{timeZone:TZ,day:'2-digit',month:'2-digit',year:'2-digit'});
+const fmtTime=iso=>new Date(iso).toLocaleTimeString('es-AR',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false});
+
+const criterionDefs=[
+  {key:'l20',label:'HL20',minGoals:14,minValid:20},
+  {key:'lc10',label:'HL10H',minGoals:7,minValid:10},
+  {key:'l6',label:'HL6',minGoals:4,minValid:6},
+  {key:'v20',label:'AL20',minGoals:14,minValid:20},
+  {key:'vf10',label:'AL10A',minGoals:7,minValid:10},
+  {key:'v6',label:'AL6',minGoals:4,minValid:6},
+  {key:'h2h',label:'H2H',minGoals:3,minValid:4}
+];
+const defaultCriteria=()=>Object.fromEntries(criterionDefs.map(c=>[c.key,{enabled:true,minGoals:c.minGoals,minValid:c.minValid}]));
+function loadCriteria(){
+  const saved=LS.get('o05:criteria',null), defaults=defaultCriteria();
+  if(!saved||typeof saved!=='object') return defaults;
+  for(const c of criterionDefs){
+    const v=saved[c.key];
+    if(v&&typeof v==='object') defaults[c.key]={enabled:v.enabled!==false,minGoals:Number.isFinite(+v.minGoals)?Math.max(0,+v.minGoals):c.minGoals,minValid:Number.isFinite(+v.minValid)?Math.max(0,+v.minValid):c.minValid};
+  }
+  return defaults;
+}
+const state={key:LS.get('o05:key',''),market:'ht05',fixtures:[],selected:new Set(LS.get('o05:leagues',[])),criteria:loadCriteria(),cancel:false,running:false,results:[],errors:[],calls:0};
+const teamMemo=new Map(), h2hMemo=new Map();
+
+function setStatus(el,txt,err){el.textContent=txt;el.classList.toggle('err',!!err)}
+
+function renderCriteria(){
+  const box=$('#criteriaList');
+  box.innerHTML=criterionDefs.map(c=>{
+    const v=state.criteria[c.key];
+    return `<div class="criterion" data-criterion="${c.key}">
+      <input type="checkbox" aria-label="Activar ${c.label}" ${v.enabled?'checked':''}>
+      <span class="criterion-name">${c.label}</span>
+      <span class="criterion-phrase">al menos</span><input type="number" min="0" step="1" aria-label="Mínimo de aciertos para ${c.label}" value="${v.minGoals}" ${v.enabled?'':'disabled'}>
+      <span class="criterion-phrase">aciertos, con</span><input type="number" min="0" step="1" aria-label="Mínimo de partidos válidos para ${c.label}" value="${v.minValid}" ${v.enabled?'':'disabled'}>
+      <span class="criterion-phrase">válidos</span>
+    </div>`;
+  }).join('');
+  $('#criteriaCount').textContent=criterionDefs.filter(c=>state.criteria[c.key].enabled).length;
+}
+function criterionStatus(t,c){
+  const v=state.criteria[c.key];
+  if(!v.enabled) return 'Inactivo';
+  if(t.valid<v.minValid) return 'No evaluable';
+  return t.hits>=v.minGoals?'Cumple':'No cumple';
+}
+function passesCriteria(r){
+  return criterionDefs.every(c=>{
+    const v=state.criteria[c.key];
+    if(!v.enabled) return true;
+    const t=r.tr.find(x=>x.k===c.key);
+    return t&&t.valid>=v.minValid&&t.hits>=v.minGoals;
+  });
+}
+
+/* ---- API ---- */
+async function api(path,params){
+  const url=new URL(API+path);
+  for(const [k,v] of Object.entries(params||{})) url.searchParams.set(k,v);
+  for(let attempt=0;attempt<4;attempt++){
+    if(state.cancel) throw new Error('Cancelado');
+    let res;
+    try{ res=await fetch(url,{headers:{'x-apisports-key':state.key}}); }
+    catch(e){ const er=new Error('No se pudo conectar con API-Football. Revisá la conexión o si un bloqueador está frenando el pedido.'); er.fatal=true; throw er; }
+    state.calls++;
+    if(res.status===429){ await sleep(8000); continue; }
+    let j;
+    try{ j=await res.json(); }catch(e){ throw new Error('Respuesta inválida de la API (HTTP '+res.status+').'); }
+    const errs=j.errors;
+    const has=errs&&(Array.isArray(errs)?errs.length>0:Object.keys(errs).length>0);
+    if(has){
+      const keys=Array.isArray(errs)?'':Object.keys(errs).join(' ');
+      const msg=Array.isArray(errs)?errs.join(', '):Object.values(errs).join(', ');
+      if(/rateLimit/i.test(keys)){ await sleep(12000); continue; }
+      const er=new Error(msg);
+      if(/token|requests|access|plan/i.test(keys+' '+msg)) er.fatal=true;
+      throw er;
+    }
+    return j;
+  }
+  throw new Error('La API limitó las consultas por minuto. Bajá la cantidad en paralelo y reintentá.');
+}
+
+async function checkStatus(){
+  try{
+    const j=await api('/status');
+    const r=j.response||{};
+    const rq=r.requests||{};
+    const plan=(r.subscription&&r.subscription.plan)||'';
+    setStatus($('#quota'),'Clave válida'+(plan?' · plan '+plan:'')+(rq.limit_day!=null?' · consultas hoy: '+rq.current+' de '+rq.limit_day:''));
+    return true;
+  }catch(e){ setStatus($('#quota'),e.message,true); return false; }
+}
+
+/* ---- caché ---- */
+function cached(k){const c=LS.get(k,null);return c&&Date.now()-c.ts<TTL?c.g:null}
+function teamGames(id){
+  const ck='o05:v2:t:'+id, c=cached(ck);
+  if(c) return Promise.resolve(c);
+  if(teamMemo.has(id)) return teamMemo.get(id);
+  const p=(async()=>{
+    const j=await api('/fixtures',{team:id,last:40,timezone:TZ});
+    const g=compact(j.response); LS.set(ck,{ts:Date.now(),g}); return g;
+  })();
+  teamMemo.set(id,p);
+  // El mapa deduplica solo solicitudes en curso; el TTL lo controla el caché persistente.
+  p.then(()=>{if(teamMemo.get(id)===p)teamMemo.delete(id)},()=>{if(teamMemo.get(id)===p)teamMemo.delete(id)});
+  return p;
+}
+function h2hGames(a,b){
+  const key=[a,b].sort((x,y)=>x-y).join('-'), ck='o05:v2:h:'+key, c=cached(ck);
+  if(c) return Promise.resolve(c);
+  if(h2hMemo.has(key)) return h2hMemo.get(key);
+  const p=(async()=>{
+    const j=await api('/fixtures/headtohead',{h2h:a+'-'+b,last:8,timezone:TZ});
+    const g=compact(j.response); LS.set(ck,{ts:Date.now(),g}); return g;
+  })();
+  h2hMemo.set(key,p);
+  // El mapa deduplica solo solicitudes en curso; el TTL lo controla el caché persistente.
+  p.then(()=>{if(h2hMemo.get(key)===p)h2hMemo.delete(key)},()=>{if(h2hMemo.get(key)===p)h2hMemo.delete(key)});
+  return p;
+}
+
+/* ---- ligas ---- */
+function isFutureFixture(f,now=Date.now()){
+  const kickoff=new Date(f.iso).getTime();
+  return Number.isFinite(kickoff)&&kickoff>now;
+}
+function visibleFixtures(){
+  const only=$('#onlyNS').checked;
+  const now=Date.now();
+  return state.fixtures.filter(f=>!only||(isFutureFixture(f,now)&&(f.st==='NS'||f.st==='TBD')));
+}
+function renderLeagues(){
+  const fx=visibleFixtures(), map=new Map();
+  for(const f of fx){
+    if(!map.has(f.lid)) map.set(f.lid,{id:f.lid,n:f.ln,c:f.lc,count:0});
+    map.get(f.lid).count++;
+  }
+  const q=$('#lfilter').value.trim().toLowerCase();
+  const list=[...map.values()].filter(l=>!q||(l.n+' '+l.c).toLowerCase().includes(q))
+    .sort((a,b)=>(b.count-a.count)||a.c.localeCompare(b.c)||a.n.localeCompare(b.n));
+  const box=$('#leagues');
+  box.innerHTML=list.map(l=>`<label class="lg"><input type="checkbox" data-id="${l.id}" ${state.selected.has(l.id)?'checked':''}><span class="t"><span class="c">${esc(l.c)} · </span>${esc(l.n)}</span><span class="n">${l.count}</span></label>`).join('')||'<div class="small" style="padding:8px">Ninguna liga coincide.</div>';
+  box.classList.toggle('hidden',state.fixtures.length===0);
+  $('#leagueTools').classList.toggle('hidden',state.fixtures.length===0);
+  updateRunBtn();
+}
+function selectedFixtures(){return visibleFixtures().filter(f=>state.selected.has(f.lid))}
+function updateRunBtn(){
+  const n=selectedFixtures().length;
+  const b=$('#btnRun');
+  b.disabled=state.running||n===0;
+  b.textContent=n?`Analizar ${n} partido${n===1?'':'s'}`:'Analizar';
+  const tot=visibleFixtures().length;
+  if(state.fixtures.length) setStatus($('#fxMsg'),`${tot} partidos en ${new Set(visibleFixtures().map(f=>f.lid)).size} ligas. Marcá las que querés analizar.`);
+}
+function persistSel(){LS.set('o05:leagues',[...state.selected])}
+
+async function buscar(){
+  if(!state.key){setStatus($('#fxMsg'),'Primero guardá tu clave de API.',true);return}
+  state.cancel=false;
+  setStatus($('#fxMsg'),'Buscando partidos…');
+  $('#btnFetch').disabled=true;
+  try{
+    const j=await api('/fixtures',{date:$('#date').value,timezone:TZ});
+    const now=Date.now();
+    state.fixtures=(j.response||[]).map(f=>({id:f.fixture.id,iso:f.fixture.date,st:f.fixture.status.short,lid:f.league.id,ln:f.league.name,lc:f.league.country||'Mundo',hid:f.teams.home.id,hn:f.teams.home.name,aid:f.teams.away.id,an:f.teams.away.name})).filter(f=>isFutureFixture(f,now));
+    if(!state.fixtures.length) setStatus($('#fxMsg'),'No quedan partidos por comenzar para esa fecha.');
+    renderLeagues();
+  }catch(e){ setStatus($('#fxMsg'),e.message,true); }
+  $('#btnFetch').disabled=false;
+}
+
+/* ---- análisis ---- */
+function prog(done,total,extra){
+  $('#progBar').style.width=(total?done*100/total:0)+'%';
+  $('#progTxt').textContent=`${done} de ${total} consultas${extra?' · '+extra:''}`;
+}
+async function analizar(){
+  const fxs=selectedFixtures();
+  if(!fxs.length||state.running) return;
+  state.running=true;state.cancel=false;state.errors=[];state.calls=0;
+  $('#applyCriteria').checked=false;
+  $('#btnRun').disabled=true;$('#btnCancel').classList.remove('hidden');$('#progWrap').classList.remove('hidden');
+  const teams=new Map(), pairs=new Map(), tg=new Map(), hg=new Map();
+  for(const f of fxs){
+    teams.set(f.hid,1);teams.set(f.aid,1);
+    pairs.set([f.hid,f.aid].sort((a,b)=>a-b).join('-'),[f.hid,f.aid]);
+  }
+  const tasks=[];
+  for(const id of teams.keys()) tasks.push(async()=>{tg.set(id,await teamGames(id))});
+  for(const [k,[a,b]] of pairs) tasks.push(async()=>{hg.set(k,await h2hGames(a,b))});
+  const total=tasks.length;let done=0,idx=0;
+  prog(0,total);
+  const worker=async()=>{
+    while(idx<tasks.length&&!state.cancel){
+      const t=tasks[idx++];
+      try{await t()}catch(e){
+        if(e.message!=='Cancelado'){ if(!state.errors.includes(e.message)) state.errors.push(e.message); if(e.fatal) state.cancel=true; }
+      }
+      done++;prog(done,total,state.calls+' llamadas a la API');
+    }
+  };
+  const n=parseInt($('#conc').value,10)||4;
+  await Promise.all(Array.from({length:n},worker));
+  const out=[];
+  for(const f of fxs){
+    const key=[f.hid,f.aid].sort((a,b)=>a-b).join('-');
+    const tr=tramos(f,tg.get(f.hid),tg.get(f.aid),hg.get(key),state.market);
+    out.push({fx:f,tr,...resumen(tr)});
+  }
+  state.results=out;
+  state.running=false;
+  $('#btnCancel').classList.add('hidden');
+  prog(total,total,state.calls+' llamadas a la API'+(state.cancel?' (cortado)':''));
+  updateRunBtn();
+  renderResults();
+  if(state.key) checkStatus();
+}
+
+/* ---- resultados ---- */
+function cellHtml(t){
+  const c=criterionDefs.find(x=>x.key===t.k), status=c&&state.criteria[c.key].enabled?criterionStatus(t,c):'';
+  const criterionNote=status?`<span class="criterion-status ${status==='Cumple'?'ok':status==='No cumple'?'no':''}">${status}</span>`:'';
+  if(!t.valid){
+    const why=t.games.length?(state.market==='ht05'?'ningún partido con marcador al descanso':'ningún partido con marcador final'):'sin partidos';
+    return `<div class="cell h0" title="${esc(t.full)}: ${why}"><span class="lab">${esc(t.lab)}</span><span class="pct">s/d</span><span class="cnt">${why.length>14?'sin HT':why}</span>${criterionNote}</div>`;
+  }
+  const short=t.games.length<t.target||t.valid<t.games.length;
+  const sample=`${t.hits}/${t.valid} aciertos · ${t.games.length}/${t.target} partidos`;
+  return `<div class="cell ${band(t.pct)}${short?' short':''}" title="${esc(t.full)}: ${t.hits}/${t.valid} válidos; ${t.games.length}/${t.target} partidos seleccionados"><span class="lab">${esc(t.lab)}</span><span class="pct">${Math.round(t.pct)}%</span><span class="cnt">${t.hits}/${t.valid}</span><span class="bar"><i style="--w:${t.pct}%"></i></span><span class="small">${esc(sample)}</span>${criterionNote}</div>`;
+}
+function cardHtml(r,i){
+  const f=r.fx;
+  return `<article class="card" data-i="${i}">
+    <div class="chead">
+      <div class="when">${esc(fmtTime(f.iso))}</div>
+      <div class="teams"><b>${esc(f.hn)}</b><span>vs</span><b>${esc(f.an)}</b></div>
+      <div class="avg ${band(r.avg)}">${r.avg===null?'—':Math.round(r.avg)+'%'}<small>promedio descriptivo<br>${r.n} de 7 indicadores</small></div>
+      <button class="fav-btn" type="button" data-favorite-id="${f.id}" aria-label="Guardar favorito" aria-pressed="false" title="Guardar en favoritos">☆</button>
+    </div>
+    <p class="league">${esc(f.lc)} · ${esc(f.ln)} · ${esc(marketDefs[state.market].short)}</p>
+    <div class="cells">${r.tr.map(cellHtml).join('')}</div>
+    <details><summary>Ver partidos usados</summary><div class="detail"></div></details>
+  </article>`;
+}
+function sorted(){
+  const m=parseInt($('#minAvg').value,10)||0, s=$('#sort').value;
+  const only=$('#onlyNS').checked, apply=$('#applyCriteria').checked, now=Date.now();
+  const list=state.results.filter(r=>(!only||(isFutureFixture(r.fx,now)&&(r.fx.st==='NS'||r.fx.st==='TBD')))&&(!apply||passesCriteria(r))&&(m===0||(r.avg!==null&&r.avg>=m)));
+  const nv=x=>x===null?-1:x;
+  if(s==='min') list.sort((a,b)=>nv(b.min)-nv(a.min)||nv(b.avg)-nv(a.avg));
+  else if(s==='time') list.sort((a,b)=>a.fx.iso.localeCompare(b.fx.iso));
+  else list.sort((a,b)=>nv(b.avg)-nv(a.avg)||nv(b.min)-nv(a.min));
+  return list;
+}
+function renderResults(){
+  const box=$('#results'), has=state.results.length>0;
+  $('#resTools').classList.toggle('hidden',!has);
+  if(!has){return}
+  const list=sorted();
+  box.innerHTML=list.length?list.map(r=>cardHtml(r,state.results.indexOf(r))).join(''):'<div class="empty">Ningún partido llega al promedio mínimo elegido.</div>';
+  const notes=[];
+  const only=$('#onlyNS').checked;
+  const shownResults=state.results.filter(r=>!only||(isFutureFixture(r.fx)&&(r.fx.st==='NS'||r.fx.st==='TBD')));
+  if($('#applyCriteria').checked){
+    const criteriaFailed=shownResults.filter(r=>!passesCriteria(r)).length;
+    if(criteriaFailed) notes.push(`${criteriaFailed} partidos no cumplen los criterios activos o no tienen la muestra mínima para evaluarlos.`);
+  }
+  const sin=shownResults.filter(r=>r.n<7).length;
+  if(sin) notes.push(`${sin} de ${shownResults.length} partidos tienen menos de 7 criterios con datos. El promedio descriptivo usa solo criterios válidos; no es una probabilidad calibrada.`);
+  const incompletos=shownResults.reduce((n,r)=>n+r.tr.filter(t=>t.valid<t.games.length||t.games.length<t.target).length,0);
+  if(incompletos) notes.push(`${incompletos} indicadores tienen menos partidos válidos que el objetivo. X/N muestra la frecuencia entre partidos con marcador ${state.market==='ht05'?'HT':'final'} conocido; los s/d no entran en N.`);
+  notes.push('Un 100% con pocos partidos no se compara con un 20/20. El promedio de indicadores es descriptivo, no una probabilidad real.');
+  for(const e of state.errors.slice(0,3)) notes.push('Error de la API: '+e);
+  $('#notes').innerHTML=notes.map(n=>`<div>${esc(n)}</div>`).join('');
+}
+function detailHtml(r){
+  return r.tr.map(t=>{
+    const rng=t.valid?` · datos del ${fmtDate(t.min)} al ${fmtDate(t.max)}`:'';
+    const inferidos=state.market==='ht05'?t.games.filter(g=>g.fh===0&&!g.ht).length:0;
+    const inferidosLabel=inferidos?` · ${inferidos} inferido(s) por FT 0-0`:'';
+    const rows=t.games.map(g=>{
+      const validScore=state.market==='ht05'?g.fh!==null:!!g.fs;
+      const hit=validScore&&hitFor(g,state.market);
+      const cls=!validScore?'na':hit?'y':'n';
+      const score=state.market==='ht05'?(g.ht?`${g.ht[0]}-${g.ht[1]}`:(g.fh===0?'0-0*':'s/d')):(g.fs?`${g.fs[0]}-${g.fs[1]}`:'s/d');
+      const mk=!validScore?'s/d':hit?(state.market==='btts'?'ambos marcan':state.market==='over25'?'+2,5':'gol'):(state.market==='btts'?'no marcan ambos':state.market==='over25'?'−2,5':'sin gol');
+      return `<li class="${cls}"><span>${fmtDate(g.d)}</span><span>${esc(g.hn)} <b>${score}</b> ${esc(g.an)}</span><span class="m">${mk}</span></li>`;
+    }).join('')||'<li class="na"><span></span><span>sin partidos</span><span></span></li>';
+    return `<div><h3>${esc(t.full)}: ${t.valid?`${t.hits}/${t.valid} válidos (${Math.round(t.pct)}%)`:'sin datos'} · ${t.games.length}/${t.target} partidos seleccionados${inferidosLabel}${rng}</h3><ul>${rows}</ul></div>`;
+  }).join('')+`<p class="small">Marcador mostrado: ${state.market==='ht05'?'primer tiempo':'tiempo completo'}. ${state.market==='ht05'?'0-0* = marcador al descanso inferido porque el resultado final fue 0-0 y faltaba el dato HT; se cuenta como sin gol. ':''}Los s/d no se incluyen en el denominador. “Seleccionados” indica partidos incluidos en la muestra, no que todos tengan un marcador verificado.</p>`;
+
+}
+function copyList(){
+  const lines=sorted().map(r=>`${fmtTime(r.fx.iso)} ${r.fx.hn} vs ${r.fx.an} (${r.fx.ln}) · prom ${r.avg===null?'s/d':Math.round(r.avg)+'%'} · `+r.tr.map(t=>t.valid?`${t.hits}/${t.valid}`:'s/d').join(' '));
+  const txt=lines.join('\n');
+  const done=ok=>{const b=$('#btnCopy');const o=b.textContent;b.textContent=ok?'Copiado':'No se pudo copiar';setTimeout(()=>b.textContent=o,1600)};
+  try{navigator.clipboard.writeText(txt).then(()=>done(true),()=>done(false))}catch(e){done(false)}
+}
+
+/* ---- eventos ---- */
+$('#date').value=new Date().toLocaleDateString('en-CA',{timeZone:TZ});
+state.market=LS.get('o05:market','ht05');
+if(!marketDefs[state.market]) state.market='ht05';
+function updateMarketUI(){
+  document.querySelectorAll('.market-option').forEach(button=>{
+    const active=button.dataset.market===state.market;
+    button.setAttribute('aria-pressed',String(active));
+  });
+  $('#appTitle').textContent=marketDefs[state.market].title;
+}
+updateMarketUI();
+document.querySelector('.market-switch').addEventListener('click',e=>{
+  const button=e.target.closest('[data-market]');
+  if(!button||button.dataset.market===state.market) return;
+  state.market=button.dataset.market;LS.set('o05:market',state.market);updateMarketUI();
+  if(state.results.length){state.results=[];$('#resTools').classList.add('hidden');$('#notes').innerHTML='';$('#results').innerHTML='<div class="empty">Cambiaste el mercado. Tocá Analizar para calcular los partidos con esta opción.</div>';}
+});
+$('#key').value=state.key;
+$('#conc').value=LS.get('o05:conc','4');
+renderCriteria();
+$('#criteriaList').addEventListener('change',e=>{
+  const row=e.target.closest('[data-criterion]');
+  if(!row) return;
+  const key=row.dataset.criterion, value=state.criteria[key];
+  if(e.target.type==='checkbox'){
+    value.enabled=e.target.checked;
+    row.querySelectorAll('input[type=number]').forEach(i=>i.disabled=!value.enabled);
+    $('#criteriaCount').textContent=criterionDefs.filter(c=>state.criteria[c.key].enabled).length;
+  }else if(e.target.type==='number'){
+    const field=e.target.getAttribute('aria-label');
+    if(field.startsWith('Mínimo de aciertos')) value.minGoals=Math.max(0,parseInt(e.target.value,10)||0);
+    else value.minValid=Math.max(0,parseInt(e.target.value,10)||0);
+    e.target.value=field.startsWith('Mínimo de aciertos')?value.minGoals:value.minValid;
+  }
+  LS.set('o05:criteria',state.criteria);
+  if(state.results.length) renderResults();
+});
+$('#criteriaReset').addEventListener('click',()=>{
+  state.criteria=defaultCriteria();
+  LS.set('o05:criteria',state.criteria);
+  renderCriteria();
+  if(state.results.length) renderResults();
+});
+$('#btnKey').addEventListener('click',async()=>{
+  state.key=$('#key').value.trim();
+  if(!state.key){setStatus($('#quota'),'Pegá tu clave primero.',true);return}
+  LS.set('o05:key',state.key);LS.set('o05:conc',$('#conc').value);
+  setStatus($('#quota'),'Probando clave…');
+  state.cancel=false;
+  await checkStatus();
+});
+$('#conc').addEventListener('change',()=>LS.set('o05:conc',$('#conc').value));
+$('#btnFetch').addEventListener('click',buscar);
+$('#onlyNS').addEventListener('change',()=>{renderLeagues();if(state.results.length)renderResults();});
+$('#applyCriteria').addEventListener('change',()=>{if(state.results.length)renderResults();});
+$('#lfilter').addEventListener('input',renderLeagues);
+$('#leagues').addEventListener('change',e=>{
+  const id=parseInt(e.target.dataset.id,10);
+  if(e.target.checked) state.selected.add(id); else state.selected.delete(id);
+  persistSel();updateRunBtn();
+});
+$('#btnAll').addEventListener('click',()=>{document.querySelectorAll('#leagues input').forEach(i=>state.selected.add(parseInt(i.dataset.id,10)));persistSel();renderLeagues()});
+$('#btnNone').addEventListener('click',()=>{document.querySelectorAll('#leagues input').forEach(i=>state.selected.delete(parseInt(i.dataset.id,10)));persistSel();renderLeagues()});
+$('#btnRun').addEventListener('click',analizar);
+$('#btnCancel').addEventListener('click',()=>{state.cancel=true});
+$('#sort').addEventListener('change',renderResults);
+$('#minAvg').addEventListener('change',renderResults);
+$('#btnCopy').addEventListener('click',copyList);
+$('#results').addEventListener('toggle',e=>{
+  const d=e.target;
+  if(d.tagName!=='DETAILS'||!d.open) return;
+  const box=d.querySelector('.detail');
+  if(box.dataset.ready) return;
+  const r=state.results[parseInt(d.closest('.card').dataset.i,10)];
+  box.innerHTML=detailHtml(r);box.dataset.ready='1';
+},true);
+
+/* ---- Favoritos privados sincronizados con Firebase ---- */
+const firebaseConfig = {
+  apiKey: "AIzaSyBfNZBOFhDUkC-oj2VK_cSLs445rawZMXE",
+  authDomain: "tanoappuestas.firebaseapp.com",
+  projectId: "tanoappuestas",
+  storageBucket: "tanoappuestas.firebasestorage.app",
+  messagingSenderId: "167345635680",
+  appId: "1:167345635680:web:94e56eec554d25565e5e05"
+};
+const favoriteState = { user:null, db:null, auth:null, items:new Map(), stop:null, ready:false };
+
+function authMessage(message, err=false){
+  const el=$('#authStatus');
+  el.textContent=message;
+  el.classList.toggle('err',!!err);
+}
+function renderFavorites(){
+  const box=$('#favorites');
+  const items=[...favoriteState.items.values()].sort((a,b)=>(a.kickoff||'').localeCompare(b.kickoff||''));
+  $('#favoriteCount').textContent='· '+items.length;
+  if(!items.length){
+    box.innerHTML='<div class="empty">Todavía no guardaste partidos favoritos.</div>';
+  }else{
+    box.innerHTML=items.map(f=>{
+      const fx=f.fixture||{id:f.id,hn:f.home,an:f.away,iso:f.kickoff,lc:'',ln:f.league||'',st:'NS'};
+      const a=f.analysis;
+      if(a && Array.isArray(a.tr)){
+        let html=originalCardHtml({fx,tr:a.tr,avg:a.avg,n:a.n},-1);
+        html=html.replace(/<button class="fav-btn"[^>]*>☆<\/button>/,
+          `<button class="fav-btn" type="button" data-favorite-id="${esc(f.id)}" aria-label="Quitar de favoritos" aria-pressed="true" title="Quitar de favoritos">★</button>`);
+        return html.replace('<article class="card" data-i="-1">','<article class="card fav-card" data-fav-detail="'+esc(f.id)+'">');
+      }
+      // Los favoritos antiguos solo guardaron datos básicos; se mantienen visibles sin inventar estadísticas.
+      return `<article class="card fav-card">
+        <div class="chead"><div class="when">${esc(f.dateText||'')}</div><div class="teams"><b>${esc(f.home)}</b><span>vs</span><b>${esc(f.away)}</b></div>
+        <button class="fav-btn" type="button" data-favorite-id="${esc(f.id)}" aria-pressed="true" aria-label="Quitar de favoritos" title="Quitar de favoritos">★</button></div>
+        <p class="league">${esc(f.league||'')} · ${esc(f.market||'')}</p><p class="small">Este favorito se guardó antes de almacenar los indicadores. Volvé a analizar el partido y guardalo nuevamente para conservar el análisis completo.</p></article>`;
+    }).join('');
+  }
+  document.querySelectorAll('[data-favorite-id]').forEach(btn=>{
+    const on=favoriteState.items.has(String(btn.dataset.favoriteId));
+    btn.setAttribute('aria-pressed',String(on));
+    btn.textContent=on?'★':'☆';
+    btn.title=on?'Quitar de favoritos':'Guardar en favoritos';
+    btn.setAttribute('aria-label',on?'Quitar de favoritos':'Guardar en favoritos');
+  });
+}
+async function toggleFavorite(fixtureId){
+  if(!favoriteState.user || !favoriteState.db){
+    authMessage('Ingresá con Google antes de guardar favoritos.',true);
+    return;
+  }
+  const id=String(fixtureId);
+  const ref=window.__favoriteFirebase.doc(favoriteState.db,'users',favoriteState.user.uid,'favorites',id);
+  try{
+    if(favoriteState.items.has(id)){
+      await window.__favoriteFirebase.deleteDoc(ref);
+    }else{
+      const r=state.results.find(x=>String(x.fx.id)===id);
+      const f=r?r.fx:state.fixtures.find(x=>String(x.id)===id);
+      if(!f){authMessage('No pude encontrar los datos de ese partido. Volvé a analizarlo.',true);return;}
+      await window.__favoriteFirebase.setDoc(ref,{
+        id,
+        home:f.hn,
+        away:f.an,
+        league:(f.lc?f.lc+' · ':'')+(f.ln||''),
+        kickoff:f.iso,
+        dateText:fmtDate(Math.floor(new Date(f.iso).getTime()/1000))+' · '+fmtTime(f.iso),
+        market:marketDefs[state.market].short,
+        fixture:{id:String(f.id),hn:f.hn,an:f.an,iso:f.iso,lc:f.lc||'',ln:f.ln||'',st:f.st||'NS'},
+        analysis:r?{avg:r.avg,n:r.n,tr:r.tr}:null,
+        savedAt:Date.now()
+      });
+    }
+  }catch(e){
+    authMessage('No se pudo actualizar el favorito. Revisá las reglas de Firestore y la conexión.',true);
+  }
+}
+async function initFirebaseFavorites(){
+  try{
+    const [appMod,authMod,fireMod]=await Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js')
+    ]);
+    const app=appMod.initializeApp(firebaseConfig);
+    favoriteState.auth=authMod.getAuth(app);
+    favoriteState.db=fireMod.getFirestore(app);
+    const {GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged}=authMod;
+    const {collection,doc,onSnapshot,getDoc,setDoc,deleteDoc,getDocs}=fireMod;
+    window.__favoriteFirebase={GoogleAuthProvider,signInWithPopup,signOut,collection,doc,setDoc,deleteDoc,onSnapshot,getDoc,getDocs};
+    const doGoogleSignIn=async()=>{
+      try{await signInWithPopup(favoriteState.auth,new GoogleAuthProvider())}
+      catch(e){
+        const msg=e.code==='auth/unauthorized-domain'?'Dominio no autorizado en Firebase Authentication. Agregá tanogralatto.github.io en Dominios autorizados.':'No se pudo iniciar sesión con Google: '+(e.message||e.code);
+        authMessage(msg,true);
+        $('#gateStatus').textContent=msg;
+      }
+    };
+    $('#googleSignIn').addEventListener('click',doGoogleSignIn);
+    $('#gateSignIn').addEventListener('click',doGoogleSignIn);
+    $('#googleSignOut').addEventListener('click',async()=>{
+      try{await signOut(favoriteState.auth)}catch(e){authMessage('No se pudo cerrar sesión.',true)}
+    });
+    const ADMIN_EMAIL='tanogralatto@gmail.com';
+    const normalizedEmail=email=>String(email||'').trim().toLowerCase();
+    const showGate=message=>{
+      $('#accessGate').style.display='flex';
+      $('#appShell').style.display='none';
+      $('#gateStatus').textContent=message||'Solo pueden ingresar las personas autorizadas por el administrador.';
+    };
+    const showApp=()=>{
+      $('#accessGate').style.display='none';
+      $('#appShell').style.display='block';
+    };
+    onAuthStateChanged(favoriteState.auth,async user=>{
+      favoriteState.user=user||null;
+      favoriteState.items.clear();
+      if(favoriteState.stop){favoriteState.stop();favoriteState.stop=null}
+      $('#googleSignIn').classList.toggle('hidden',!!user);
+      $('#googleSignOut').classList.toggle('hidden',!user);
+      if(!user){
+        showGate('Iniciá sesión con Google. Solo ingresan las cuentas autorizadas por el administrador.');
+        authMessage('Sesión cerrada.');
+        renderFavorites();
+        return;
+      }
+      const email=normalizedEmail(user.email);
+      let authorized=email===ADMIN_EMAIL;
+      if(!authorized){
+        try{
+          const allowRef=doc(favoriteState.db,'allowedUsers',email);
+          const allowSnap=await getDoc(allowRef);
+          authorized=allowSnap.exists() && allowSnap.data().allowed===true;
+        }catch(e){
+          showGate('No se pudo verificar tu autorización. Revisá las reglas de Firestore e intentá nuevamente.');
+          await signOut(favoriteState.auth);
+          return;
+        }
+      }
+      if(!authorized){
+        showGate('La cuenta '+(user.email||'')+' no está autorizada. Pedile acceso al administrador.');
+        await signOut(favoriteState.auth);
+        return;
+      }
+      showApp();
+      $('#gateStatus').textContent='';
+      authMessage('Acceso autorizado: '+(user.displayName||user.email||'Google')+'. Sincronizando favoritos…');
+      const ref=collection(favoriteState.db,'users',user.uid,'favorites');
+      favoriteState.stop=onSnapshot(ref,snapshot=>{
+        favoriteState.items.clear();
+        snapshot.forEach(d=>favoriteState.items.set(d.id,{...d.data(),id:d.id}));
+        authMessage('Conectado como '+(user.displayName||user.email||'Google')+' · favoritos sincronizados.');
+        renderFavorites();renderResults();
+      },err=>{
+        authMessage('No se pudieron leer favoritos. Revisá las reglas de Firestore.',true);
+      });
+    });
+  }catch(e){
+    const detail = (e && (e.message || e.code)) ? (e.message || e.code) : String(e);
+    const msg = 'No se pudo iniciar Firebase: ' + detail;
+    authMessage(msg,true);
+    const gateStatus = $('#gateStatus');
+    if (gateStatus) gateStatus.textContent = msg;
+    console.error('[TANOapp] Error al inicializar Firebase:', e);
+  }
+}
+// Diagnóstico visible: si la inicialización de Firebase falla antes de registrar el botón,
+// mostrar un aviso en pantalla en vez de dejar el botón aparentemente inactivo.
+$('#gateSignIn').addEventListener('click',()=>{
+  if (!favoriteState.auth) {
+    const msg = 'Firebase todavía no se inicializó. Recargá la página; si persiste, copiá el mensaje de error que aparece aquí.';
+    const status = $('#gateStatus');
+    if (status && !status.textContent.includes('No se pudo iniciar Firebase')) status.textContent = msg;
+  }
+});
+$('#results').addEventListener('click',e=>{
+  const btn=e.target.closest('[data-favorite-id]');
+  if(btn) toggleFavorite(btn.dataset.favoriteId);
+});
+$('#favorites').addEventListener('click',e=>{
+  const remove=e.target.closest('[data-remove-favorite]');
+  if(remove){toggleFavorite(remove.dataset.removeFavorite);return}
+  const btn=e.target.closest('[data-favorite-id]');
+  if(btn) toggleFavorite(btn.dataset.favoriteId);
+});
+$('#favorites').addEventListener('toggle',e=>{
+  const d=e.target;
+  if(d.tagName!=='DETAILS'||!d.open) return;
+  const card=d.closest('[data-fav-detail]');
+  if(!card) return;
+  const box=d.querySelector('.detail');
+  if(box.dataset.ready) return;
+  const fav=favoriteState.items.get(String(card.dataset.favDetail));
+  if(fav&&fav.analysis&&Array.isArray(fav.analysis.tr)){
+    box.innerHTML=detailHtml({tr:fav.analysis.tr});
+    box.dataset.ready='1';
+  }
+},true);
+const originalCardHtml=cardHtml;
+cardHtml=function(r,i){
+  const result=originalCardHtml(r,i);
+  const id=String(r.fx.id), saved=favoriteState.items.has(id);
+  return result.replace(`data-favorite-id="${id}" aria-label="Guardar favorito" aria-pressed="false" title="Guardar en favoritos">☆`,
+    `data-favorite-id="${id}" aria-label="${saved?'Quitar de favoritos':'Guardar favorito'}" aria-pressed="${saved}" title="${saved?'Quitar de favoritos':'Guardar en favoritos'}">${saved?'★':'☆'}`);
+};
+initFirebaseFavorites();
+
+</script>
+</body>
+</html>
