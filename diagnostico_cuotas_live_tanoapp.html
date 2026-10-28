@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TANOapp — Diagnóstico de cuotas en vivo</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:850px;margin:24px auto;padding:0 16px;color:#172033}
+h1{font-size:1.5rem}label{display:block;margin:14px 0 6px;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:11px;border:1px solid #aab3c2;border-radius:8px;font-size:16px}
+button{padding:11px 14px;margin:12px 8px 8px 0;border:0;border-radius:8px;background:#164e9b;color:white;font-weight:600}
+button:disabled{opacity:.5}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4f7;padding:14px;border-radius:8px;min-height:100px}
+.note{background:#fff4d6;padding:12px;border-radius:8px}
+small{color:#536174}
+</style>
+</head>
+<body>
+<h1>TANOapp — Diagnóstico de cuotas en vivo</h1>
+<p>Esta herramienta hace una prueba puntual contra API-Football. No modifica TANOapp, no guarda la clave, no envía mensajes a Telegram y no realiza apuestas.</p>
+<div class="note"><b>Privacidad:</b> la clave se usa desde este navegador para consultar directamente a API-Football. No la compartas ni publiques esta página con una clave cargada. Al cerrar la página, el campo se vacía.</div>
+<label for="key">Clave API-Football</label>
+<input id="key" type="password" autocomplete="off" placeholder="Pegá tu clave aquí">
+<button id="markets">1. Consultar mercados en vivo</button>
+<button id="odds" disabled>2. Revisar cuotas en vivo actuales</button>
+<label for="filter">Filtro de mercados (opcional)</label>
+<input id="filter" value="over|goal|half|1st|first|total|0.5|0,5" placeholder="Palabras para buscar">
+<pre id="out">Esperando la prueba. Primero consultá los mercados.</pre>
+<script>
+const $=id=>document.getElementById(id);
+let markets=[];
+function log(x){$('out').textContent=typeof x==='string'?x:JSON.stringify(x,null,2)}
+function key(){const k=$('key').value.trim();if(!k)throw Error('Ingresá tu clave API-Football.');return k}
+function matchesFilter(s){const terms=$('filter').value.toLowerCase().split('|').map(x=>x.trim()).filter(Boolean);return !terms.length||terms.some(t=>s.toLowerCase().includes(t))}
+async function get(path){
+ const res=await fetch('https://v3.football.api-sports.io/'+path,{headers:{'x-apisports-key':key()}});
+ let data;try{data=await res.json()}catch{throw Error('La respuesta no es JSON. HTTP '+res.status)}
+ if(!res.ok||data.errors&&Object.keys(data.errors).length)throw Error('HTTP '+res.status+' — '+JSON.stringify(data.errors||data));
+ return data;
+}
+$('markets').onclick=async()=>{
+ $('markets').disabled=true;$('odds').disabled=true;log('Consultando /odds/live/bets …');
+ try{
+  const d=await get('odds/live/bets');
+  markets=d.response||[];
+  const relevant=markets.filter(x=>matchesFilter((x.name||'')+' '+(x.id||'')));
+  log({resultado:'Mercados en vivo consultados',totalMercados:markets.length,coincidenciasFiltro:relevant.length,mercadosCoincidentes:relevant,nota:'Guardá el nombre y el ID exactos de cualquier mercado que parezca ser Más de 0,5 goles en el primer tiempo. La coincidencia por palabras no confirma por sí sola que sea el mercado correcto.'});
+  $('odds').disabled=false;
+ }catch(e){log('Error al consultar mercados: '+e.message)}
+ finally{$('markets').disabled=false}
+};
+$('odds').onclick=async()=>{
+ $('odds').disabled=true;log('Consultando /odds/live … Puede que no haya partidos con cuotas disponibles en este momento.');
+ try{
+  const d=await get('odds/live');
+  const fixtures=d.response||[];
+  const found=[];
+  for(const f of fixtures){
+   for(const b of (f.bookmakers||[])){
+    for(const bet of (b.bets||[])){
+     const market=markets.find(m=>String(m.id)===String(bet.id));
+     const name=(bet.name||market?.name||'');
+     if(matchesFilter(name)){
+      found.push({partido:f.fixture?.id,liga:f.league?.name,local:f.teams?.home?.name,visitante:f.teams?.away?.name,minuto:f.fixture?.status?.elapsed,marcador:f.goals,operador:b.name,mercado:name,betId:bet.id,valores:bet.values});
+     }
+    }
+   }
+  }
+  log({resultado:'Cuotas en vivo consultadas',partidosConCuotas:fixtures.length,mercadosCoincidentes:found.length,coincidencias:found.slice(0,100),nota:fixtures.length===0?'No había cuotas disponibles en la respuesta en este momento; probá durante un partido en vivo.': 'Revisá los nombres exactos de mercado, valores, cuota y handicap. Esto todavía no activa alertas.'});
+ }catch(e){log('Error al consultar cuotas en vivo: '+e.message)}
+ finally{$('odds').disabled=false}
+};
+window.addEventListener('pagehide',()=>{$('key').value=''});
+</script>
+</body>
+</html>
