@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnóstico detallado de cuotas en vivo - TANOapp</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;max-width:900px;margin:0 auto;padding:18px;line-height:1.45;color:#17202a}
+h1{font-size:1.45rem} label{display:block;font-weight:600;margin-top:14px}
+input,button{font:inherit;padding:10px;width:100%;box-sizing:border-box;margin-top:6px}
+button{cursor:pointer;border:0;border-radius:8px;background:#1463d6;color:white;font-weight:700;margin-top:14px}
+button.secondary{background:#465466} .note{background:#fff6d8;padding:12px;border-radius:8px}
+#status{margin:14px 0;font-weight:600} pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#101820;color:#e6edf3;padding:14px;border-radius:8px;font-size:12px}
+.small{font-size:.9rem;color:#445}
+</style>
+</head>
+<body>
+<h1>Diagnóstico detallado de cuotas en vivo — TANOapp</h1>
+<p>Esta herramienta consulta API-Football directamente desde tu navegador para inspeccionar los mercados de partidos en vivo. No modifica TANOapp, no envía alertas a Telegram y no guarda la clave en este archivo.</p>
+<p class="note"><b>Privacidad:</b> ingresá tu clave solo en este formulario oficial que estás usando. No la pegues en el chat ni compartas capturas donde se vea.</p>
+<label for="key">Clave API-Football (x-apisports-key)</label>
+<input id="key" type="password" autocomplete="off" placeholder="Ingresá tu clave API-Football">
+<label for="base">URL base (dejá el valor predeterminado)</label>
+<input id="base" value="https://v3.football.api-sports.io">
+<button id="run">Inspeccionar mercados y selecciones de partidos en vivo</button>
+<button id="download" class="secondary" disabled>Descargar resultado JSON</button>
+<div id="status"></div>
+<pre id="out">Todavía no se ejecutó la consulta.</pre>
+<script>
+let lastResult = null;
+const statusEl = document.getElementById('status');
+const outEl = document.getElementById('out');
+function safeText(x){return x == null ? "" : String(x);}
+document.getElementById('run').addEventListener('click', async () => {
+  const key = document.getElementById('key').value.trim();
+  const base = document.getElementById('base').value.trim().replace(/\/+$/,'');
+  if(!key){statusEl.textContent='Ingresá la clave API-Football para continuar.';return;}
+  statusEl.textContent='Consultando partidos en vivo y cuotas. Puede tardar unos segundos…';
+  outEl.textContent='';
+  document.getElementById('download').disabled = true;
+  try {
+    const headers = {'x-apisports-key': key};
+    const fixturesRes = await fetch(base + '/fixtures?live=all', {headers});
+    const fixturesJson = await fixturesRes.json();
+    if(!fixturesRes.ok || fixturesJson.errors && Object.keys(fixturesJson.errors).length){
+      throw new Error('Error consultando partidos: ' + JSON.stringify(fixturesJson.errors || fixturesJson));
+    }
+    const fixtures = fixturesJson.response || [];
+    // Live odds endpoint returns the current in-play odds list. Query once and inspect all returned market names/selections.
+    const oddsRes = await fetch(base + '/odds/live', {headers});
+    const oddsJson = await oddsRes.json();
+    if(!oddsRes.ok || oddsJson.errors && Object.keys(oddsJson.errors).length){
+      throw new Error('Error consultando cuotas en vivo: ' + JSON.stringify(oddsJson.errors || oddsJson));
+    }
+    const rawOdds = oddsJson.response || [];
+    const fixtureInfo = new Map(fixtures.map(f => [String(f.fixture?.id), {
+      fixtureId:f.fixture?.id,
+      date:f.fixture?.date,
+      elapsed:f.fixture?.status?.elapsed,
+      status:f.fixture?.status?.short,
+      league:f.league?.name,
+      country:f.league?.country,
+      home:f.teams?.home?.name,
+      away:f.teams?.away?.name,
+      goalsHome:f.goals?.home,
+      goalsAway:f.goals?.away
+    }]));
+    const results = [];
+    for(const item of rawOdds) {
+      const fixtureId = item.fixture?.id ?? item.fixture_id ?? item.fixtureId;
+      const info = fixtureInfo.get(String(fixtureId)) || {};
+      const bookmakers = item.bookmakers || item.odds || [];
+      const marketRows = [];
+      for(const bookmaker of bookmakers) {
+        const bets = bookmaker.bets || bookmaker.markets || [];
+        for(const bet of bets) {
+          const name = safeText(bet.name || bet.market || bet.label);
+          const id = bet.id ?? bet.bet_id ?? bet.market_id ?? null;
+          const values = bet.values || bet.selections || bet.outcomes || [];
+          const normalizedValues = values.map(v => ({
+            value: v.value ?? v.name ?? v.label ?? null,
+            odd: v.odd ?? v.odds ?? v.price ?? null,
+            handicap: v.handicap ?? v.line ?? null
+          }));
+          marketRows.push({bookmaker: bookmaker.name || bookmaker.bookmaker || null, marketId:id, marketName:name, selections:normalizedValues});
+        }
+      }
+      // Keep all markets from live odds, with a prioritized flag for half/goal/over/Asian-related names or selections.
+      const relevant = marketRows.filter(m => {
+        const blob = (m.marketName + ' ' + JSON.stringify(m.selections)).toLowerCase();
+        return /1st half|first half|half time|asian|over|under|goal|total/.test(blob);
+      });
+      results.push({
+        fixture: {
+          fixtureId: fixtureId ?? info.fixtureId ?? null,
+          home: info.home || item.teams?.home?.name || item.home || null,
+          away: info.away || item.teams?.away?.name || item.away || null,
+          league: info.league || item.league?.name || null,
+          country: info.country || item.league?.country || null,
+          status: info.status || null,
+          elapsed: info.elapsed ?? null,
+          score: (info.goalsHome ?? '?') + '-' + (info.goalsAway ?? '?'),
+          date: info.date || item.fixture?.date || null
+        },
+        totalMarketsFound: marketRows.length,
+        relevantMarkets: relevant
+      });
+    }
+    lastResult = {
+      result: 'Diagnóstico detallado de cuotas en vivo',
+      liveFixturesCount: fixtures.length,
+      oddsFixturesCount: rawOdds.length,
+      fixturesWithMarketData: results.length,
+      note: 'Se incluyen mercados relevantes por nombre o selecciones; esto no confirma por sí solo que el mercado asiático Over 0.5 de primer tiempo esté disponible.',
+      fixtures: results
+    };
+    outEl.textContent = JSON.stringify(lastResult, null, 2);
+    statusEl.textContent = 'Consulta terminada. Partidos en vivo: ' + fixtures.length + '; entradas con cuotas: ' + rawOdds.length + '.';
+    document.getElementById('download').disabled = false;
+  } catch(e) {
+    statusEl.textContent='No se pudo completar la consulta.';
+    outEl.textContent=String(e && e.message ? e.message : e) + '\n\nSi el error menciona CORS, esta consulta puede estar bloqueada por el navegador; no significa necesariamente que tu plan no tenga los datos.';
+  }
+});
+document.getElementById('download').addEventListener('click', () => {
+  if(!lastResult) return;
+  const blob = new Blob([JSON.stringify(lastResult, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='diagnostico-detallado-cuotas-live-tanoapp.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
