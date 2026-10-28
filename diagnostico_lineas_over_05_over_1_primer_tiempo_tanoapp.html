@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnóstico de líneas Over 0.5 y Over 1.0 1T — TANOapp</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:1050px;margin:24px auto;padding:0 16px;line-height:1.45;color:#172033}
+h1{font-size:1.55rem} .card{border:1px solid #d6dbe5;border-radius:12px;padding:16px;margin:14px 0}
+label{display:block;font-weight:600;margin:10px 0 4px} input{box-sizing:border-box;width:100%;padding:11px;border:1px solid #aab3c2;border-radius:8px}
+button{padding:11px 15px;border:0;border-radius:8px;background:#155eef;color:white;font-weight:650;margin:8px 8px 8px 0;cursor:pointer}
+button.secondary{background:#475467} pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f8fb;padding:12px;border-radius:8px;max-height:520px;overflow:auto}
+.status{padding:10px;border-radius:8px;background:#eef4ff}.warn{background:#fff4e5}.small{font-size:.92rem;color:#475467}
+table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{border:1px solid #d6dbe5;padding:7px;text-align:left;vertical-align:top}th{background:#f6f8fb}
+</style>
+</head>
+<body>
+<h1>Diagnóstico de líneas Over 0.5 y Over 1.0 de primer tiempo</h1>
+<p>Consulta partidos y cuotas live de API-Football, conserva todas las selecciones y detecta específicamente Over 0.5 y Over 1.0 del primer tiempo, incluyendo la línea guardada dentro de cada selección. No modifica TANOapp ni envía mensajes a Telegram.</p>
+<div class="card">
+<label for="key">API key de API-Football</label>
+<input id="key" type="password" autocomplete="off" placeholder="Pegá tu API key acá; no se guarda en el archivo">
+<p class="small">La clave se usa solo desde esta página para hacer las consultas. No la compartas ni la pegues en el chat.</p>
+<label for="host">Host de la API</label>
+<input id="host" value="https://v3.football.api-sports.io">
+<button id="run">Consultar partidos y mercados live</button>
+<button id="download" class="secondary" disabled>Descargar JSON completo</button>
+<div id="status" class="status">Listo para consultar.</div>
+</div>
+<div class="card">
+<h2>Resumen</h2><div id="summary">Todavía no hay resultados.</div>
+</div>
+<div class="card">
+<h2>Mercados identificados como primer tiempo</h2>
+<div id="tableWrap">Todavía no hay resultados.</div>
+</div>
+<div class="card">
+<h2>Over 0.5 y Over 1.0 de primer tiempo</h2><div id="targetWrap">Todavía no hay resultados.</div>
+<p class="small">La línea puede estar en la selección (por ejemplo, handicap = 1) y no en el mercado. Se registra también el campo main y si la cuota está suspendida. La API puede no informar la casa de apuestas en /odds/live; si no viene en la respuesta, quedará como no informada.</p>
+</div>
+<div class="card">
+<h2>Respuesta de diagnóstico (JSON)</h2>
+<p class="small">Incluye la estructura cruda de algunas entradas para poder revisar la respuesta si API-Football cambia el formato.</p>
+<pre id="out">Todavía no hay resultados.</pre>
+</div>
+<script>
+let lastResult=null;
+const $=id=>document.getElementById(id);
+function safe(v){return v===undefined||v===null?'':String(v)}
+function isFirstHalf(text){
+  const s=safe(text).toLowerCase();
+  return /\b1st half\b|\bfirst half\b|\b1st-half\b|\bfirst-half\b|\bhalf time\b|\bhalftime\b|\b1st period\b|\bperiod 1\b|\bmi-temps?\b|\bprimer tiempo\b|\b1er tiempo\b|\b1ª parte\b|\b1a parte\b|\b1st h\b/.test(s)
+    || /\(1st half\)|\(first half\)|\(1st-half\)/.test(s);
+}
+function normMarket(m, fixtureId, fixtureName, bookmakerName, sourcePath){
+  if(!m || typeof m!=='object') return null;
+  const name=safe(m.name||m.bet||m.market||m.label);
+  const id=m.id??m.bet_id??m.market_id??null;
+  const values=Array.isArray(m.values)?m.values:(Array.isArray(m.selections)?m.selections:(Array.isArray(m.outcomes)?m.outcomes:[]));
+  const joined=[name, safe(m.description), safe(m.type)].join(' ');
+  if(!isFirstHalf(joined)) return null;
+  return {fixtureId,fixture:fixtureName,marketId:id,marketName:name,bookmaker:bookmakerName||safe(m.bookmaker)||'',sourcePath,
+    line:m.line??m.handicap??null,values:values.map(v=>({
+      value:v?.value??v?.name??v?.label??null,
+      odd:v?.odd??v?.odds??v?.price??null,
+      suspended:v?.suspended??null,
+      raw:v
+    })),raw:m};
+}
+function fixtureName(f){
+ const h=f?.teams?.home?.name||f?.home?.name||f?.home_name||'Local';
+ const a=f?.teams?.away?.name||f?.away?.name||f?.away_name||'Visitante';
+ return h+' vs '+a;
+}
+function extractMarkets(item, fixtureMap){
+ const fid=item?.fixture?.id??item?.fixture_id??item?.id??null;
+ const fix=fixtureMap.get(String(fid));
+ const name=fix?.name||item?.fixture?.name||'Partido no identificado';
+ const found=[];
+ // API-Football /odds/live can expose item.odds as a direct array of market objects.
+ if(Array.isArray(item?.odds)){
+   item.odds.forEach((m,i)=>{
+     const row=normMarket(m,fid,name,m?.bookmaker?.name||m?.bookmaker_name||'',`odds[${i}]`);
+     if(row) found.push(row);
+     // Handle unusual nested market shape too.
+     for(const key of ['bets','markets']){
+       if(Array.isArray(m?.[key])) m[key].forEach((x,j)=>{
+         const r=normMarket(x,fid,name,m?.name||m?.bookmaker?.name||'',`odds[${i}].${key}[${j}]`);
+         if(r) found.push(r);
+       });
+     }
+   });
+ }
+ // Some API responses / endpoints wrap markets in bookmakers.
+ if(Array.isArray(item?.bookmakers)){
+   item.bookmakers.forEach((b,bi)=>{
+     const booksafe=b?.name||b?.title||'';
+     for(const key of ['bets','markets','odds']){
+       if(Array.isArray(b?.[key])) b[key].forEach((m,mi)=>{
+         const row=normMarket(m,fid,name,booksafe,`bookmakers[${bi}].${key}[${mi}]`);
+         if(row) found.push(row);
+       });
+     }
+   });
+ }
+ // Other known wrappers, kept defensive.
+ for(const key of ['bets','markets']){
+   if(Array.isArray(item?.[key])) item[key].forEach((m,i)=>{
+     const row=normMarket(m,fid,name,'',`${key}[${i}]`);
+     if(row) found.push(row);
+   });
+ }
+ return found;
+}
+async function apiGet(base,path,key){
+ const response=await fetch(base.replace(/\/+$/,'')+path,{headers:{'x-apisports-key':key}});
+ const text=await response.text();
+ let json; try{json=JSON.parse(text)}catch{throw new Error(path+' respondió HTTP '+response.status+' con contenido que no es JSON: '+text.slice(0,250))}
+ if(!response.ok || json?.errors && Object.keys(json.errors).length){
+   throw new Error(path+' — HTTP '+response.status+' — '+JSON.stringify(json.errors||json).slice(0,700));
+ }
+ return json;
+}
+function escapeHtml(s){return safe(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function render(rows, result){
+ $('summary').innerHTML=`<p><strong>Partidos en vivo:</strong> ${result.liveFixturesCount}</p>
+ <p><strong>Partidos con respuesta de cuotas:</strong> ${result.oddsFixturesCount}</p>
+ <p><strong>Mercados identificados como primer tiempo:</strong> ${rows.length}</p>
+ <p><strong>Partidos con al menos un mercado de primer tiempo:</strong> ${new Set(rows.map(r=>String(r.fixtureId))).size}</p>
+ <p class="small">Se clasifican por el nombre/descripción del mercado. Si un mercado de primer tiempo viene sin esas palabras en su nombre, quedará visible en las muestras crudas para revisión y podremos ampliar las reglas.</p>`;
+ if(!rows.length){$('tableWrap').innerHTML='<div class="status warn">No se detectaron nombres que indiquen primer tiempo. Esto no demuestra que no existan: revisá las muestras crudas y la estructura devuelta por la API.</div>';return}
+ const sorted=[...rows].sort((a,b)=>String(a.fixture).localeCompare(String(b.fixture))||String(a.marketId).localeCompare(String(b.marketId)));
+ $('tableWrap').innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Partido</th><th>ID mercado</th><th>Mercado</th><th>Bookmaker</th><th>Línea del mercado</th><th>Selecciones / cuotas / línea</th><th>Ruta en JSON</th></tr></thead><tbody>'+sorted.map(r=>`<tr><td>${escapeHtml(r.fixture)}<br><span class="small">Fixture ${escapeHtml(r.fixtureId)}</span></td><td>${escapeHtml(r.marketId)}</td><td>${escapeHtml(r.marketName)}</td><td>${escapeHtml(r.bookmaker||'No informada por API')}</td><td>${escapeHtml(r.line)}</td><td>${r.values.map(v=>escapeHtml(v.value)+' → '+escapeHtml(v.odd)+' | línea '+escapeHtml(v.raw?.handicap??v.raw?.line??'—')+' | main='+escapeHtml(v.raw?.main??'—')+' | suspendida='+escapeHtml(v.suspended??'—')).join('<br>')||'<span class="small">No se encontró array values</span>'}</td><td>${escapeHtml(r.sourcePath)}</td></tr>`).join('')+'</tbody></table></div>';
+ const target=[];
+ for(const r of rows){
+   for(const v of (r.values||[])){
+     const value=safe(v.value).trim().toLowerCase();
+     const line=safe(v.raw?.handicap??v.raw?.line??r.line).trim().replace(',', '.');
+     if(value==='over' && (line==='0.5'||line==='0.50'||line==='1'||line==='1.0'||line==='1.00')){
+       target.push({fixture:r.fixture,fixtureId:r.fixtureId,marketId:r.marketId,marketName:r.marketName,bookmaker:r.bookmaker||'No informada por API',line,odd:v.odd,main:v.raw?.main??null,suspended:v.suspended,sourcePath:r.sourcePath});
+     }
+   }
+ }
+ target.sort((a,b)=>a.line.localeCompare(b.line)||a.fixture.localeCompare(b.fixture));
+ $('targetWrap').innerHTML=target.length?'<div style="overflow-x:auto"><table><thead><tr><th>Partido</th><th>Línea</th><th>Cuota Over</th><th>ID / mercado</th><th>Casa</th><th>Principal (main)</th><th>Suspendida</th></tr></thead><tbody>'+target.map(x=>`<tr><td>${escapeHtml(x.fixture)}<br><span class="small">Fixture ${escapeHtml(x.fixtureId)}</span></td><td>${escapeHtml(x.line)}</td><td>${escapeHtml(x.odd)}</td><td>${escapeHtml(x.marketId)} — ${escapeHtml(x.marketName)}</td><td>${escapeHtml(x.bookmaker)}</td><td>${escapeHtml(x.main)}</td><td>${escapeHtml(x.suspended)}</td></tr>`).join('')+'</tbody></table></div><p><strong>Total de selecciones Over 0.5 / Over 1.0:</strong> ${target.length}</p>':'<div class="status warn">No se encontraron selecciones Over con líneas 0.5 o 1.0 en los mercados detectados como primer tiempo. Revisá las muestras crudas: puede que la línea venga en otro campo o que el mercado no esté disponible en este momento.</div>';
+ result.targetOverSelections=target;
+}
+$('run').addEventListener('click',async()=>{
+ const key=$('key').value.trim(),base=$('host').value.trim();
+ if(!key){$('status').textContent='Pegá la API key en el campo para iniciar.';return}
+ $('run').disabled=true;$('download').disabled=true;
+ $('status').textContent='Consultando partidos en vivo y cuotas…';
+ try{
+  const [liveJson,oddsJson]=await Promise.all([
+   apiGet(base,'/fixtures?live=all',key),
+   apiGet(base,'/odds/live',key)
+  ]);
+  const lives=Array.isArray(liveJson.response)?liveJson.response:[];
+  const odds=Array.isArray(oddsJson.response)?oddsJson.response:[];
+  const fixtureMap=new Map();
+  lives.forEach(f=>fixtureMap.set(String(f?.fixture?.id),{name:fixtureName(f),raw:f}));
+  odds.forEach(o=>{
+   const fid=o?.fixture?.id??o?.fixture_id??o?.id;
+   if(fid!==undefined && !fixtureMap.has(String(fid))) fixtureMap.set(String(fid),{name:fixtureName(o),raw:null});
+  });
+  const rows=odds.flatMap(item=>extractMarkets(item,fixtureMap));
+  // Include compact shape samples even when the parser found no first-half market.
+  const rawSamples=odds.slice(0,5).map((o,i)=>({
+   index:i,fixtureId:o?.fixture?.id??o?.fixture_id??o?.id,
+   fixtureName:fixtureMap.get(String(o?.fixture?.id??o?.fixture_id??o?.id))?.name,
+   topLevelKeys:Object.keys(o||{}),
+   oddsIsArray:Array.isArray(o?.odds),oddsLength:Array.isArray(o?.odds)?o.odds.length:null,
+   firstOddsEntries:Array.isArray(o?.odds)?o.odds.slice(0,8):null,
+   bookmakersIsArray:Array.isArray(o?.bookmakers),bookmakersLength:Array.isArray(o?.bookmakers)?o.bookmakers.length:null,
+   bookmakersFirst:Array.isArray(o?.bookmakers)?o.bookmakers.slice(0,2):null,
+   rawObject:o
+  }));
+  const result={
+   generatedAt:new Date().toISOString(),
+   liveFixturesCount:lives.length,oddsFixturesCount:odds.length,
+   fixturesWithOddsData:new Set(odds.map(o=>String(o?.fixture?.id??o?.fixture_id??o?.id)).filter(x=>x!=='undefined')).size,
+   firstHalfMarketRows:rows.length,
+   firstHalfMarkets:rows,
+   liveFixtures:lives.map(f=>({id:f?.fixture?.id,name:fixtureName(f),status:f?.fixture?.status?.short,elapsed:f?.fixture?.status?.elapsed,goals:f?.goals})),
+   rawOddsSamples:rawSamples,
+   apiErrors:{fixtures:liveJson.errors||{},odds:oddsJson.errors||{}}
+  };
+  lastResult=result;
+  render(rows,result);
+  $('out').textContent=JSON.stringify(result,null,2);
+  $('download').disabled=false;
+  $('status').textContent='Diagnóstico terminado. Mercados de primer tiempo encontrados: '+rows.length+'.';
+ }catch(e){
+  $('status').textContent='Error: '+e.message+' — Si aparece un error CORS, probá abrir este archivo en la Mac y revisar la configuración/endpoint permitido por API-Football.';
+  $('status').className='status warn';
+  $('out').textContent=String(e.stack||e);
+ }finally{$('run').disabled=false}
+});
+$('download').addEventListener('click',()=>{
+ if(!lastResult)return;
+ const blob=new Blob([JSON.stringify(lastResult,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);const a=document.createElement('a');
+ a.href=url;a.download='diagnostico-lineas-over-05-over-1-primer-tiempo-tanoapp.json';a.click();
+ URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
